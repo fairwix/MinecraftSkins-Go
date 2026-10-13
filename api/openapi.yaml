@@ -1,0 +1,219 @@
+openapi: 3.1.0
+info:
+  title: MinecraftSkins API
+  version: 1.0.0
+  description: API каталога Minecraft-скинов и покупок с фиксацией курса BTC/USD.
+servers:
+  - url: http://localhost:8080
+paths:
+  /api/skins:
+    get:
+      summary: Получить каталог скинов
+      parameters:
+        - in: query
+          name: availableOnly
+          schema: { type: boolean, default: false }
+        - in: query
+          name: search
+          schema: { type: string }
+        - in: query
+          name: skip
+          schema: { type: integer, minimum: 0, default: 0 }
+        - in: query
+          name: take
+          schema: { type: integer, minimum: 1, maximum: 100, default: 20 }
+      responses:
+        "200":
+          description: Список скинов с рассчитанными ценами
+          headers:
+            X-Total-Count:
+              schema: { type: integer }
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/Skin" }
+    post:
+      summary: Создать скин
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CreateSkin" }
+      responses:
+        "201": { description: Скин создан }
+        "400": { $ref: "#/components/responses/Problem" }
+  /api/skins/{id}:
+    parameters:
+      - in: path
+        name: id
+        required: true
+        schema: { type: string, format: uuid }
+    get:
+      summary: Получить один скин и актуальную цену
+      responses:
+        "200": { description: Скин найден, content: { application/json: { schema: { $ref: "#/components/schemas/Skin" } } } }
+        "404": { $ref: "#/components/responses/Problem" }
+    put:
+      summary: Частично обновить скин
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/UpdateSkin" }
+      responses:
+        "200": { description: Скин обновлён }
+        "400": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+    delete:
+      summary: Удалить скин (soft delete)
+      responses:
+        "204": { description: Скин удалён }
+        "404": { $ref: "#/components/responses/Problem" }
+  /api/rates/btc-usd:
+    get:
+      summary: Получить текущий курс BTC/USD
+      responses:
+        "200":
+          description: Курс с информацией об источнике и возрасте значения
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Rate" }
+        "503": { $ref: "#/components/responses/Problem" }
+  /api/purchases:
+    get:
+      summary: Получить историю покупок
+      parameters:
+        - in: query
+          name: mineOnly
+          schema: { type: boolean, default: false }
+        - in: query
+          name: skinId
+          schema: { type: string, format: uuid }
+        - in: query
+          name: from
+          schema: { type: string, format: date-time }
+        - in: query
+          name: to
+          schema: { type: string, format: date-time }
+        - in: query
+          name: skip
+          schema: { type: integer, minimum: 0, default: 0 }
+        - in: query
+          name: take
+          schema: { type: integer, minimum: 1, maximum: 100, default: 20 }
+        - in: header
+          name: X-User-Id
+          schema: { type: string }
+      responses:
+        "200":
+          description: Список чеков
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/Purchase" }
+        "400": { $ref: "#/components/responses/Problem" }
+    post:
+      summary: Купить скин
+      parameters:
+        - in: header
+          name: X-User-Id
+          required: true
+          schema: { type: string, maxLength: 100 }
+        - in: header
+          name: Idempotency-Key
+          schema: { type: string, maxLength: 100 }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [skinId]
+              properties:
+                skinId: { type: string, format: uuid }
+      responses:
+        "201": { description: Покупка сохранена или возвращён исходный чек при повторе ключа }
+        "400": { $ref: "#/components/responses/Problem" }
+        "409": { $ref: "#/components/responses/Problem" }
+        "503": { $ref: "#/components/responses/Problem" }
+  /api/purchases/{id}:
+    get:
+      summary: Получить чек покупки
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        "200":
+          description: Покупка найдена
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Purchase" }
+        "404": { $ref: "#/components/responses/Problem" }
+  /health:
+    get:
+      summary: Проверить API, базу и источник курса
+      responses:
+        "200": { description: Сервис доступен }
+        "503": { description: База данных недоступна }
+components:
+  responses:
+    Problem:
+      description: Ошибка в формате Problem Details
+      content:
+        application/problem+json:
+          schema: { $ref: "#/components/schemas/Problem" }
+  schemas:
+    Skin:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        name: { type: string, maxLength: 255 }
+        basePriceUsd: { type: number, format: decimal }
+        finalPriceUsd: { type: number, format: decimal }
+        isAvailable: { type: boolean }
+        createdAtUtc: { type: string, format: date-time }
+        updatedAtUtc: { type: [string, "null"], format: date-time }
+    CreateSkin:
+      type: object
+      required: [name, basePriceUsd]
+      properties:
+        name: { type: string, minLength: 1, maxLength: 255 }
+        basePriceUsd: { type: number, exclusiveMinimum: 0, multipleOf: 0.01 }
+        isAvailable: { type: boolean }
+    UpdateSkin:
+      type: object
+      properties:
+        name: { type: string, minLength: 1, maxLength: 255 }
+        basePriceUsd: { type: number, exclusiveMinimum: 0, multipleOf: 0.01 }
+        isAvailable: { type: boolean }
+    Rate:
+      type: object
+      properties:
+        rate: { type: number, format: decimal }
+        asOfUtc: { type: string, format: date-time }
+        source: { type: string, enum: [External, Cache, Fallback] }
+        ageSeconds: { type: [integer, "null"] }
+    Purchase:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        skinId: { type: string, format: uuid }
+        skinName: { type: string }
+        priceUsdFinal: { type: number, format: decimal }
+        btcUsdRate: { type: number, format: decimal }
+        rateSource: { type: string }
+        purchasedAtUtc: { type: string, format: date-time }
+        buyerId: { type: string }
+    Problem:
+      type: object
+      properties:
+        type: { type: string }
+        title: { type: string }
+        status: { type: integer }
+        detail: { type: string }
+        instance: { type: string }
+        errors: { type: object, additionalProperties: { type: string } }
