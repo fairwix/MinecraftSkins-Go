@@ -5,8 +5,7 @@ import (
 	"github.com/shopspring/decimal"
 )
 
-// FinalPrice applies the catalog's BTC-linked multiplier and rounds cents to even,
-// matching decimal rounding used by the original C# implementation.
+// FinalPrice applies the catalog's BTC-linked multiplier and rounds cents to even.
 func FinalPrice(basePriceUSD, btcUSD decimal.Decimal) decimal.Decimal {
 	return domain.FinalPrice(basePriceUSD, btcUSD)
 }
