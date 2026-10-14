@@ -35,6 +35,8 @@ paths:
                 items: { $ref: "#/components/schemas/Skin" }
     post:
       summary: Создать скин
+      description: Требуется Bearer API key администратора.
+      security: [{ bearerAuth: [] }]
       requestBody:
         required: true
         content:
@@ -43,6 +45,8 @@ paths:
       responses:
         "201": { description: Скин создан }
         "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
   /api/skins/{id}:
     parameters:
       - in: path
@@ -56,6 +60,8 @@ paths:
         "404": { $ref: "#/components/responses/Problem" }
     put:
       summary: Частично обновить скин
+      description: Требуется Bearer API key администратора.
+      security: [{ bearerAuth: [] }]
       requestBody:
         required: true
         content:
@@ -65,11 +71,17 @@ paths:
         "200": { description: Скин обновлён }
         "400": { $ref: "#/components/responses/Problem" }
         "404": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
     delete:
       summary: Удалить скин (soft delete)
+      description: Требуется Bearer API key администратора.
+      security: [{ bearerAuth: [] }]
       responses:
         "204": { description: Скин удалён }
         "404": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
   /api/rates/btc-usd:
     get:
       summary: Получить текущий курс BTC/USD
@@ -83,6 +95,8 @@ paths:
   /api/purchases:
     get:
       summary: Получить историю покупок
+      description: Требуется Bearer API key. Demo user видит только свои чеки; администратор может запросить все.
+      security: [{ bearerAuth: [] }]
       parameters:
         - in: query
           name: mineOnly
@@ -102,9 +116,6 @@ paths:
         - in: query
           name: take
           schema: { type: integer, minimum: 1, maximum: 100, default: 20 }
-        - in: header
-          name: X-User-Id
-          schema: { type: string }
       responses:
         "200":
           description: Список чеков
@@ -114,13 +125,12 @@ paths:
                 type: array
                 items: { $ref: "#/components/schemas/Purchase" }
         "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
     post:
       summary: Купить скин
+      description: Покупатель определяется по Bearer API key. Demo user всегда привязан к настроенному DEMO_USER_ID.
+      security: [{ bearerAuth: [] }]
       parameters:
-        - in: header
-          name: X-User-Id
-          required: true
-          schema: { type: string, maxLength: 100 }
         - in: header
           name: Idempotency-Key
           schema: { type: string, maxLength: 100 }
@@ -138,9 +148,12 @@ paths:
         "400": { $ref: "#/components/responses/Problem" }
         "409": { $ref: "#/components/responses/Problem" }
         "503": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
   /api/purchases/{id}:
     get:
       summary: Получить чек покупки
+      description: Пользователь может читать только собственный чек; администратор может читать любой.
+      security: [{ bearerAuth: [] }]
       parameters:
         - in: path
           name: id
@@ -153,6 +166,7 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/Purchase" }
         "404": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
   /health:
     get:
       summary: Проверить API, базу и источник курса
@@ -217,3 +231,8 @@ components:
         detail: { type: string }
         instance: { type: string }
         errors: { type: object, additionalProperties: { type: string } }
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: API key

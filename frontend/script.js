@@ -6,9 +6,7 @@ if (!window.APP_CONFIG || !window.APP_CONFIG.apiBaseUrl) {
     throw new Error('Конфигурация приложения не загружена');
 }
 const API_BASE_URL = window.APP_CONFIG.apiBaseUrl;
-
-// ID пользователя (можно оставить как есть или тоже вынести в конфиг)
-const USER_ID = 'user123';
+const API_KEY = window.APP_CONFIG.apiKey;
 
 // Состояние приложения
 let currentBtcRate = null;
@@ -20,7 +18,7 @@ const purchasedSkins = new Set();
 function getHeaders() {
     return {
         'Content-Type': 'application/json',
-        'X-User-Id': USER_ID
+        'Authorization': `Bearer ${API_KEY}`
     };
 }
 
@@ -28,7 +26,7 @@ function getHeaders() {
 function generateIdempotencyKey(skinId) {
     const timestamp = Date.now();
     const random = Math.random().toString(36).substring(2, 10);
-    return `${USER_ID}-${skinId}-${timestamp}-${random}`;
+    return `${skinId}-${timestamp}-${random}`;
 }
 
 // Показать уведомление
@@ -205,7 +203,7 @@ async function loadSkins() {
                     <i class="fas ${icon}"></i>
                 </div>
                 <div class="skin-info">
-                    <h3>${skin.name}</h3>
+                    <h3 class="skin-name"></h3>
                     <div class="skin-base-price">$${skin.basePriceUsd.toFixed(2)}</div>
                     <div class="skin-final-price">$${skin.finalPriceUsd.toFixed(2)}</div>
                     <button class="buy-btn"
@@ -217,6 +215,7 @@ async function loadSkins() {
                 </div>
             `;
 
+            card.querySelector('.skin-name').textContent = skin.name;
             skinsGrid.appendChild(card);
         });
 
@@ -251,7 +250,7 @@ async function buySkin(event) {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
-                'X-User-Id': USER_ID,
+                'Authorization': `Bearer ${API_KEY}`,
                 'Idempotency-Key': idempotencyKey  // Один ключ на всю операцию
             },
             body: JSON.stringify({ skinId })
@@ -359,7 +358,7 @@ async function loadPurchases() {
                     <i class="fas fa-cube"></i>
                 </div>
                 <div class="purchase-details">
-                    <div class="purchase-name">${purchase.skinName}</div>
+                    <div class="purchase-name"></div>
                     <div class="purchase-meta">
                         <span><i class="far fa-calendar"></i> ${formattedDate}</span>
                         <span><i class="fas fa-hashtag"></i> ${purchase.id.slice(0, 8)}</span>
@@ -374,6 +373,7 @@ async function loadPurchases() {
                 </div>
             `;
 
+            item.querySelector('.purchase-name').textContent = purchase.skinName;
             purchasesList.appendChild(item);
         });
 
@@ -394,7 +394,7 @@ window.testIdempotency = async function(skinId) {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
-                'X-User-Id': USER_ID,
+                'Authorization': `Bearer ${API_KEY}`,
                 'Idempotency-Key': key
             },
             body: JSON.stringify({ skinId })

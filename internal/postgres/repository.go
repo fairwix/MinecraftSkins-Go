@@ -165,6 +165,9 @@ func (r *Repository) CreatePurchase(ctx context.Context, skinID, buyerID string,
 			`SELECT `+purchaseColumns+` FROM purchases p JOIN skins s ON s.id = p.skin_id
 			 WHERE p.buyer_id = $1 AND p.idempotency_key = $2`, buyerID, *key))
 		if err == nil {
+			if existing.SkinID != skinID {
+				return domain.Purchase{}, domain.ErrIdempotencyConflict
+			}
 			if err := tx.Commit(ctx); err != nil {
 				return domain.Purchase{}, fmt.Errorf("commit idempotent purchase read: %w", err)
 			}
@@ -193,6 +196,9 @@ func (r *Repository) CreatePurchase(ctx context.Context, skinID, buyerID string,
 			`SELECT `+purchaseColumns+` FROM purchases p JOIN skins s ON s.id = p.skin_id
 			 WHERE p.buyer_id = $1 AND p.idempotency_key = $2`, buyerID, *key))
 		if err == nil {
+			if existing.SkinID != skinID {
+				return domain.Purchase{}, domain.ErrIdempotencyConflict
+			}
 			if err := tx.Commit(ctx); err != nil {
 				return domain.Purchase{}, fmt.Errorf("commit idempotent purchase read: %w", err)
 			}
@@ -222,6 +228,9 @@ func (r *Repository) CreatePurchase(ctx context.Context, skinID, buyerID string,
 				return domain.Purchase{}, lookupErr
 			}
 			if existing != nil {
+				if existing.SkinID != skinID {
+					return domain.Purchase{}, domain.ErrIdempotencyConflict
+				}
 				return *existing, nil
 			}
 		}

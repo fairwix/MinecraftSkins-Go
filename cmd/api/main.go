@@ -44,7 +44,9 @@ func main() {
 	rates := ratestore.New(cfg.CoinGeckoBaseURL, logger)
 	skins := service.NewSkinService(repository, rates)
 	purchases := service.NewPurchaseService(repository, rates)
-	api := httpapi.New(skins, purchases, rates, repository, logger)
+	api := httpapi.New(skins, purchases, rates, repository, logger, httpapi.AuthConfig{
+		AdminAPIKey: cfg.AdminAPIKey, DemoUserAPIKey: cfg.DemoUserAPIKey, DemoUserID: cfg.DemoUserID,
+	})
 
 	server := &http.Server{
 		Addr:              cfg.HTTPAddr,

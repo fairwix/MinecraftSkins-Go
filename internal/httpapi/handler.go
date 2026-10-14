@@ -2,6 +2,7 @@ package httpapi
 
 import (
 	"context"
+	"crypto/subtle"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -100,13 +101,30 @@ type Handler struct {
 	database  databaseHealth
 	logger    *slog.Logger
 	instance  string
+	auth      AuthConfig
 }
 
-func New(skins skinService, purchases purchaseService, rates rateService, database databaseHealth, logger *slog.Logger) *Handler {
+type AuthConfig struct {
+	AdminAPIKey    string
+	DemoUserAPIKey string
+	DemoUserID     string
+}
+
+type principal struct {
+	userID string
+	role   string
+}
+
+type principalContextKey struct{}
+
+func New(skins skinService, purchases purchaseService, rates rateService, database databaseHealth, logger *slog.Logger, auth AuthConfig) *Handler {
 	if logger == nil {
 		logger = slog.Default()
 	}
-	return &Handler{skins: skins, purchases: purchases, rates: rates, database: database, logger: logger, instance: env("INSTANCE_ID", "unknown")}
+	return &Handler{
+		skins: skins, purchases: purchases, rates: rates, database: database,
+		logger: logger, instance: env("INSTANCE_ID", "unknown"), auth: auth,
+	}
 }
 
 var idPattern = regexp.MustCompile(`^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$`)
@@ -115,18 +133,60 @@ func (h *Handler) Routes() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /api/skins", h.listSkins)
 	mux.HandleFunc("GET /api/skins/{id}", h.getSkin)
-	mux.HandleFunc("POST /api/skins", h.createSkin)
-	mux.HandleFunc("PUT /api/skins/{id}", h.updateSkin)
-	mux.HandleFunc("DELETE /api/skins/{id}", h.deleteSkin)
+	mux.Handle("POST /api/skins", h.authorize(http.HandlerFunc(h.createSkin), "admin"))
+	mux.Handle("PUT /api/skins/{id}", h.authorize(http.HandlerFunc(h.updateSkin), "admin"))
+	mux.Handle("DELETE /api/skins/{id}", h.authorize(http.HandlerFunc(h.deleteSkin), "admin"))
 	mux.HandleFunc("GET /api/rates/btc-usd", h.getRate)
-	mux.HandleFunc("POST /api/purchases", h.createPurchase)
-	mux.HandleFunc("GET /api/purchases", h.listPurchases)
-	mux.HandleFunc("GET /api/purchases/{id}", h.getPurchase)
+	mux.Handle("POST /api/purchases", h.authorize(http.HandlerFunc(h.createPurchase), "user", "admin"))
+	mux.Handle("GET /api/purchases", h.authorize(http.HandlerFunc(h.listPurchases), "user", "admin"))
+	mux.Handle("GET /api/purchases/{id}", h.authorize(http.HandlerFunc(h.getPurchase), "user", "admin"))
 	mux.HandleFunc("GET /health", h.health)
 	mux.HandleFunc("GET /api/health", h.health)
 	mux.HandleFunc("GET /api/health/ping", h.ping)
 	mux.HandleFunc("GET /api/health/detailed", h.health)
 	return h.middleware(mux)
+}
+
+func (h *Handler) authorize(next http.Handler, allowedRoles ...string) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		const prefix = "Bearer "
+		authorization := r.Header.Get("Authorization")
+		if len(authorization) < len(prefix) || !strings.EqualFold(authorization[:len(prefix)], prefix) {
+			writeProblem(w, r, domain.ErrUnauthenticated)
+			return
+		}
+		caller, ok := h.authenticate(strings.TrimSpace(authorization[len(prefix):]))
+		if !ok {
+			writeProblem(w, r, domain.ErrUnauthenticated)
+			return
+		}
+		for _, role := range allowedRoles {
+			if caller.role == role {
+				ctx := context.WithValue(r.Context(), principalContextKey{}, caller)
+				next.ServeHTTP(w, r.WithContext(ctx))
+				return
+			}
+		}
+		writeProblem(w, r, domain.ErrForbidden)
+	})
+}
+
+func (h *Handler) authenticate(token string) (principal, bool) {
+	if token == "" {
+		return principal{}, false
+	}
+	if h.auth.AdminAPIKey != "" && subtle.ConstantTimeCompare([]byte(token), []byte(h.auth.AdminAPIKey)) == 1 {
+		return principal{userID: "admin", role: "admin"}, true
+	}
+	if h.auth.DemoUserAPIKey != "" && subtle.ConstantTimeCompare([]byte(token), []byte(h.auth.DemoUserAPIKey)) == 1 {
+		return principal{userID: h.auth.DemoUserID, role: "user"}, true
+	}
+	return principal{}, false
+}
+
+func currentPrincipal(ctx context.Context) principal {
+	caller, _ := ctx.Value(principalContextKey{}).(principal)
+	return caller
 }
 
 func (h *Handler) listSkins(w http.ResponseWriter, r *http.Request) {
@@ -255,8 +315,8 @@ func (h *Handler) createPurchase(w http.ResponseWriter, r *http.Request) {
 		writeProblem(w, r, &domain.ValidationError{Fields: map[string]string{"skinId": "Некорректный UUID"}})
 		return
 	}
-	userID := r.Header.Get("X-User-Id")
-	purchase, err := h.purchases.Create(r.Context(), request.SkinID, userID, r.Header.Get("Idempotency-Key"))
+	caller := currentPrincipal(r.Context())
+	purchase, err := h.purchases.Create(r.Context(), request.SkinID, caller.userID, r.Header.Get("Idempotency-Key"))
 	if err != nil {
 		writeProblem(w, r, err)
 		return
@@ -280,12 +340,9 @@ func (h *Handler) listPurchases(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	filter := domain.PurchaseFilter{}
-	if mineOnly {
-		filter.BuyerID = r.Header.Get("X-User-Id")
-		if strings.TrimSpace(filter.BuyerID) == "" {
-			writeProblem(w, r, &domain.ValidationError{Fields: map[string]string{"X-User-Id": "Заголовок обязателен для mineOnly=true"}})
-			return
-		}
+	caller := currentPrincipal(r.Context())
+	if caller.role != "admin" || mineOnly {
+		filter.BuyerID = caller.userID
 	}
 	filter.SkinID = query.Get("skinId")
 	if filter.SkinID != "" && !validID(filter.SkinID) {
@@ -335,6 +392,11 @@ func (h *Handler) getPurchase(w http.ResponseWriter, r *http.Request) {
 		writeProblem(w, r, err)
 		return
 	}
+	caller := currentPrincipal(r.Context())
+	if caller.role != "admin" && purchase.BuyerID != caller.userID {
+		writeProblem(w, r, domain.ErrNotFound)
+		return
+	}
 	writeJSON(w, http.StatusOK, toPurchaseResponse(purchase))
 }
 
@@ -377,7 +439,7 @@ func (h *Handler) middleware(next http.Handler) http.Handler {
 		w.Header().Set("X-Instance-Id", h.instance)
 		w.Header().Set("X-Content-Type-Options", "nosniff")
 		w.Header().Set("Access-Control-Allow-Origin", "*")
-		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, X-User-Id, Idempotency-Key")
+		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization, Idempotency-Key")
 		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
 		if r.Method == http.MethodOptions {
 			w.WriteHeader(http.StatusNoContent)
@@ -436,6 +498,12 @@ func writeProblem(w http.ResponseWriter, r *http.Request, err error) {
 		if errors.As(err, &external) {
 			problem["service"] = external.Service
 		}
+	case errors.Is(err, domain.ErrUnauthenticated):
+		status, title, detail = http.StatusUnauthorized, "Требуется аутентификация", "Передайте действительный Bearer API key"
+	case errors.Is(err, domain.ErrForbidden):
+		status, title, detail = http.StatusForbidden, "Недостаточно прав", "У этой учётной записи нет доступа к операции"
+	case errors.Is(err, domain.ErrIdempotencyConflict):
+		status, title, detail = http.StatusConflict, "Конфликт ключа идемпотентности", "Этот ключ уже использован для другого запроса"
 	case errors.Is(err, context.Canceled):
 		return
 	default:

@@ -40,6 +40,9 @@ func (s *PurchaseService) Create(ctx context.Context, skinID, buyerID, idempoten
 			return domain.Purchase{}, err
 		}
 		if existing != nil {
+			if existing.SkinID != skinID {
+				return domain.Purchase{}, domain.ErrIdempotencyConflict
+			}
 			return *existing, nil
 		}
 	}

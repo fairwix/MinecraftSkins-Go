@@ -12,6 +12,8 @@ var (
 	ErrExternalService     = errors.New("external service unavailable")
 	ErrInvalidInput        = errors.New("invalid input")
 	ErrIdempotencyConflict = errors.New("idempotency key conflict")
+	ErrUnauthenticated     = errors.New("authentication required")
+	ErrForbidden           = errors.New("forbidden")
 )
 
 func NewID() (string, error) {
